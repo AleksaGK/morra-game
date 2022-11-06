@@ -16,15 +16,16 @@ const ctcRuzica = accRuzica.contract(backend, ctcAleksa.getInfo());
 
 const HAND = [0, 1, 2, 3, 4, 5];
 const RESULTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-const OUTCOME = ["Ruzica wins", "Draw", "Aleksa wins"];
+const OUTCOME = ["Aleksa wins", "Draw", "Ruzica wins"];
 const Player = (Who) => ({
+  ...stdlib.hasRandom,
   getHand: () => {
     const hand = Math.floor(Math.random() * 2);
     console.log(`${Who} played ${HAND[hand]}`);
     return hand;
   },
   getResult: () => {
-    const result = Math.floor(Math.random() * 2);
+    const result = Math.floor(Math.random() * 3);
     console.log(`${Who} expecting result: ${RESULTS[result]}`);
     return result;
   },
