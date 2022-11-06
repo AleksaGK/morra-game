@@ -21,27 +21,39 @@ const Player = {
 export const main = Reach.App(() => {
   const Aleksa = Participant("Aleksa", {
     ...Player,
+    wager: UInt,
   });
   const Ruzica = Participant("Ruzica", {
     ...Player,
+    acceptWager: Fun([UInt], Null),
   });
 
   init();
 
   Aleksa.only(() => {
+    const amount = declassify(interact.wager);
     const handAleksa = declassify(interact.getHand());
     const resultAleksa = declassify(interact.getResult());
   });
 
-  Aleksa.publish(handAleksa, resultAleksa);
+  Aleksa.publish(handAleksa, resultAleksa, amount).pay(amount);
   commit();
 
   Ruzica.only(() => {
+    interact.acceptWager(amount);
     const handRuzica = declassify(interact.getHand());
     const resultRuzica = declassify(interact.getResult());
   });
-  Ruzica.publish(handRuzica, resultRuzica);
+  Ruzica.publish(handRuzica, resultRuzica).pay(amount);
+
   const outcome = winner(handAleksa, handRuzica, resultAleksa, resultRuzica);
+
+  const [forAleksa, forRuzica] =
+    outcome == 2 ? [2, 0] : outcome == 0 ? [0, 2] : [1, 1];
+
+  transfer(forAleksa * amount).to(Aleksa);
+  transfer(forRuzica * amount).to(Ruzica);
+
   commit();
 
   each([Aleksa, Ruzica], () => {
