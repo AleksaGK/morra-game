@@ -15,7 +15,7 @@ const [
   R_NINE,
   R_TEN,
 ] = makeEnum(11);
-const [isOutcome, A_WINS, DRAW, R_WINS] = makeEnum(3);
+const [isOutcome, A_WINS, DRAW, B_WINS] = makeEnum(3);
 
 const winner = (handAleksa, handRuzica, resultAleksa, resultRuzica) => {
   if (resultAleksa == resultRuzica) {
@@ -23,14 +23,14 @@ const winner = (handAleksa, handRuzica, resultAleksa, resultRuzica) => {
   } else if (handAleksa + handRuzica == resultAleksa) {
     return A_WINS;
   } else if (handAleksa + handRuzica == resultRuzica) {
-    return R_WINS;
+    return B_WINS;
   } else {
     return DRAW;
   }
 };
 
 assert(winner(H_ZERO, H_ZERO, R_ZERO, R_ZERO) == DRAW);
-assert(winner(H_ZERO, H_ZERO, R_ONE, R_ZERO) == R_WINS);
+assert(winner(H_ZERO, H_ZERO, R_ONE, R_ZERO) == B_WINS);
 assert(winner(H_ZERO, H_ZERO, R_ZERO, R_ONE) == A_WINS);
 
 forall(UInt, (handAleksa) =>
@@ -58,12 +58,14 @@ const Player = {
   getHand: Fun([], UInt),
   getResult: Fun([], UInt),
   seeOutcome: Fun([UInt], Null),
+  informTimeout: Fun([], Null),
 };
 
 export const main = Reach.App(() => {
   const Aleksa = Participant("Aleksa", {
     ...Player,
     wager: UInt,
+    deadline: UInt,
   });
   const Ruzica = Participant("Ruzica", {
     ...Player,
@@ -72,60 +74,97 @@ export const main = Reach.App(() => {
 
   init();
 
+  const informTimeout = () => {
+    each([Aleksa, Ruzica], () => {
+      interact.informTimeout();
+    });
+  };
+
   Aleksa.only(() => {
     const amount = declassify(interact.wager);
-    //hand
-    const _handAleksa = interact.getHand();
-    const [_commitHandAleksa, _saltHandAleksa] = makeCommitment(
-      interact,
-      _handAleksa
-    );
-    const commitHandAleksa = declassify(_commitHandAleksa);
-    //result
-    const _resultAleksa = interact.getResult();
-    const [_commitResultAleksa, _saltResultAleksa] = makeCommitment(
-      interact,
-      _resultAleksa
-    );
-    const commitResultAleksa = declassify(_commitResultAleksa);
+    const deadline = declassify(interact.deadline);
   });
 
-  Aleksa.publish(commitHandAleksa, commitResultAleksa, amount).pay(amount);
+  Aleksa.publish(amount, deadline).pay(amount);
   commit();
-
-  unknowable(
-    Ruzica,
-    Aleksa(_handAleksa, _saltHandAleksa, _resultAleksa, _saltResultAleksa)
-  );
 
   Ruzica.only(() => {
     interact.acceptWager(amount);
-    const handRuzica = declassify(interact.getHand());
-    const resultRuzica = declassify(interact.getResult());
   });
-  Ruzica.publish(handRuzica, resultRuzica).pay(amount);
-  commit();
+  Ruzica.pay(amount).timeout(relativeTime(deadline), () =>
+    closeTo(Aleksa, informTimeout)
+  );
 
-  Aleksa.only(() => {
-    const saltHandAleksa = declassify(_saltHandAleksa);
-    const handAleksa = declassify(_handAleksa);
+  var outcome = DRAW;
+  invariant(balance() == 2 * amount && isOutcome(outcome));
+  while (outcome == DRAW) {
+    commit();
 
-    const saltResultAleksa = declassify(_saltResultAleksa);
-    const resultAleksa = declassify(_resultAleksa);
-  });
+    Aleksa.only(() => {
+      //hand
+      const _handAleksa = interact.getHand();
+      const [_commitHandAleksa, _saltHandAleksa] = makeCommitment(
+        interact,
+        _handAleksa
+      );
+      const commitHandAleksa = declassify(_commitHandAleksa);
+      //result
+      const _resultAleksa = interact.getResult();
+      const [_commitResultAleksa, _saltResultAleksa] = makeCommitment(
+        interact,
+        _resultAleksa
+      );
+      const commitResultAleksa = declassify(_commitResultAleksa);
+    });
 
-  Aleksa.publish(handAleksa, saltHandAleksa, resultAleksa, saltResultAleksa);
-  checkCommitment(commitHandAleksa, saltHandAleksa, handAleksa);
-  checkCommitment(commitResultAleksa, saltResultAleksa, resultAleksa);
+    Aleksa.publish(commitHandAleksa, commitResultAleksa).timeout(
+      relativeTime(deadline),
+      () => {
+        closeTo(Ruzica, informTimeout);
+      }
+    );
+    commit();
 
-  const outcome = winner(handAleksa, handRuzica, resultAleksa, resultRuzica);
+    unknowable(
+      Ruzica,
+      Aleksa(_handAleksa, _saltHandAleksa, _resultAleksa, _saltResultAleksa)
+    );
 
-  const [forAleksa, forRuzica] =
-    outcome == A_WINS ? [2, 0] : outcome == R_WINS ? [0, 2] : [1, 1];
+    Ruzica.only(() => {
+      const handRuzica = declassify(interact.getHand());
+      const resultRuzica = declassify(interact.getResult());
+    });
+    Ruzica.publish(handRuzica, resultRuzica).timeout(
+      relativeTime(deadline),
+      () => closeTo(Aleksa, informTimeout)
+    );
+    commit();
 
-  transfer(forAleksa * amount).to(Aleksa);
-  transfer(forRuzica * amount).to(Ruzica);
+    Aleksa.only(() => {
+      const saltHandAleksa = declassify(_saltHandAleksa);
+      const handAleksa = declassify(_handAleksa);
 
+      const saltResultAleksa = declassify(_saltResultAleksa);
+      const resultAleksa = declassify(_resultAleksa);
+    });
+    Aleksa.publish(
+      handAleksa,
+      saltHandAleksa,
+      resultAleksa,
+      saltResultAleksa
+    ).timeout(relativeTime(deadline), () => {
+      closeTo(Ruzica, informTimeout);
+    });
+
+    checkCommitment(commitHandAleksa, saltHandAleksa, handAleksa);
+    checkCommitment(commitResultAleksa, saltResultAleksa, resultAleksa);
+    outcome = winner(handAleksa, handRuzica, resultAleksa, resultRuzica);
+    continue;
+  } //end of while
+
+  assert(outcome == A_WINS || outcome == B_WINS);
+
+  transfer(2 * amount).to(outcome == A_WINS ? Aleksa : Ruzica);
   commit();
 
   each([Aleksa, Ruzica], () => {
